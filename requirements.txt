@@ -1,0 +1,13 @@
+fastapi==0.111.0
+uvicorn==0.30.1
+streamlit==1.36.0
+pydantic==2.7.4
+celery==5.4.0
+redis==5.0.7
+qdrant-client==1.9.1
+flashrank==0.2.8
+datasets==2.20.0
+numpy==1.26.4
+python-dotenv==1.0.1
+requests==2.32.3
+nltk==3.8.1
