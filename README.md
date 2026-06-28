@@ -2,6 +2,29 @@
 
 A production-grade medical literature search engine that combines semantic understanding with keyword matching to find relevant PubMed research papers.
 
+## 🚀 Quick Access
+
+The main entry point for using the application is the **Streamlit web UI**.
+
+**Open the UI:** [http://localhost:8501](http://localhost:8501)
+
+**Start the UI:**
+```bash
+streamlit run src/ui/app.py
+```
+
+> Make sure the FastAPI backend and Celery worker are running first (see [Running the System](#running-the-system) below).
+
+## 📄 Documentation
+
+For a comprehensive technical overview, see the **[Project Specification](docs/SPEC.md)**, which covers:
+
+- System architecture and component responsibilities
+- Full technology stack and model choices
+- Feature descriptions and design rationale
+- End-to-end data and search pipeline details
+- Current status, success criteria, and future roadmap
+
 ## Features
 
 - **Hybrid Search**: Combines dense vector search (semantic) with sparse BM25 search (keyword)
