@@ -2,7 +2,18 @@
   "permissions": {
     "allow": [
       "Bash(python *)",
-      "Bash(.venv/Scripts/python *)"
+      "Bash(.venv/Scripts/python *)",
+      "Bash(curl -s -m 5 http://localhost:6333/collections/medical_documents)",
+      "Bash(python3 -m json.tool)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(curl -s http://localhost:6333/collections/medical_documents)",
+      "Bash(curl -s http://localhost:8000/docs)",
+      "Bash(curl -s http://localhost:8501)",
+      "Read(//c/Program Files/Docker/Docker/**)",
+      "Bash(powershell.exe -Command \"Get-Command 'docker' -ErrorAction SilentlyContinue | Select-Object Source\")",
+      "Bash(wsl *)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "PowerShell(python tmp_hybrid_internal.py)"
     ]
   }
 }
