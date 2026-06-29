@@ -225,6 +225,8 @@ Measured after scaling the corpus from 100 to 1000 documents on the local CPU-on
 | Embedding batch size | 32 |
 | Search cache TTL | 3600 seconds (1 hour) |
 | Search cache key | SHA-256 of `query:top_k:section_filter` |
+| Cache warming | Default set of 15 common medical queries, on-demand via `POST /cache/warm` |
+| Cache admin endpoints | `GET /cache/stats`, `DELETE /cache/clear`, `POST /cache/warm` |
 
 ### Search Latency & Top Scores
 
@@ -240,8 +242,23 @@ Measured after scaling the corpus from 100 to 1000 documents on the local CPU-on
 - All five queries returned 5 results.
 - Four of five queries produced top rerank scores above 0.95. The "gene therapy" query returned a still-strong top score of 0.80, reflecting a smaller number of directly relevant abstracts in the sampled 1000-document subset.
 - Cache-miss latency is dominated by the CPU cross-encoder reranker and TEI embedding call (~6–8 s).
-- Cache-hit latency is **<100 ms** (observed ~14 ms for repeated identical queries) because results are served directly from Redis without re-running embedding, retrieval, or reranking.
+- Cache-hit latency is **<100 ms** (observed ~5–15 ms for repeated identical queries) because results are served directly from Redis without re-running embedding, retrieval, or reranking.
 - Redis caches search responses for 1 hour using a key derived from the normalized query, `top_k`, and optional `section_filter`.
+- A `POST /cache/warm` endpoint pre-populates the cache with a default set of 15 common medical queries (or a user-supplied list), so the first user search for those queries is also sub-100 ms.
+- Operational cache endpoints (`GET /cache/stats`, `DELETE /cache/clear`) allow runtime cache inspection and eviction.
+
+---
+
+## 10. Next Steps / Future Enhancements
+
+### 9.1 Cache Warming & Administration
+
+A dedicated cache management layer keeps first-time queries fast:
+
+- **`POST /cache/warm`** — pre-populates the cache with the default warm query set or a custom list. Skips already-cached keys. Returns `queries_warmed`, `already_cached`, `newly_cached`, and any `errors`.
+- **`GET /cache/stats`** — returns `total_keys`, `cache_keys`, `memory_used`, `connected_clients`, `uptime_seconds`, `hit_rate`, `hits`, `misses`, and `avg_ttl_remaining`.
+- **`DELETE /cache/clear`** — removes all `search_cache:*` keys and returns the number of cleared keys.
+- **Startup warming** — optional; enabled by setting `CACHE_WARM_ON_STARTUP=true`. Runs in a background thread so application boot is not blocked.
 
 ---
 

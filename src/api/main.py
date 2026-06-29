@@ -1,25 +1,35 @@
 """FastAPI skeleton for the Medical Hybrid Search POC.
 
 Endpoints:
-- GET  /health          Health check for API and downstream services.
-- POST /ingest          Trigger async ingestion of a raw PubMed JSONL file.
+- GET    /health          Health check for API and downstream services.
+- POST   /ingest          Trigger async ingestion of a raw PubMed JSONL file.
+- POST   /search          Hybrid dense + sparse search with reranking and Redis caching.
+- POST   /cache/warm      Pre-populate the Redis cache with common medical queries.
+- GET    /cache/stats     Return operational cache statistics.
+- DELETE /cache/clear     Clear all cached search results.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-import redis
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from src.api.cache_warming import (
+    cache_key,
+    cache_stats,
+    clear_cache,
+    get_redis_client,
+    warm_cache,
+)
 from src.retrieval.hybrid_search import hybrid_search
 from src.retrieval.reranker import rerank_results
 from src.tasks.ingest_tasks import ingest_documents_pipeline
@@ -29,29 +39,6 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-_redis_client: redis.Redis | None = None
-
-
-def _get_redis_client() -> redis.Redis | None:
-    """Return a Redis client, or None if Redis is unreachable."""
-    global _redis_client
-    if _redis_client is not None:
-        return _redis_client
-    try:
-        _redis_client = redis.from_url(REDIS_URL, decode_responses=True)
-        _redis_client.ping()
-        return _redis_client
-    except Exception as exc:
-        logger.warning(f"Redis unavailable, search caching disabled: {exc}")
-        _redis_client = None
-        return None
-
-
-def _cache_key(query: str, top_k: int, section_filter: str | None) -> str:
-    """Build a deterministic cache key for a search request."""
-    key_payload = f"{query.strip().lower()}:{top_k}:{section_filter or ''}"
-    return f"search_cache:{hashlib.sha256(key_payload.encode()).hexdigest()}"
 
 app = FastAPI(
     title="Medical Hybrid Search API",
@@ -108,6 +95,48 @@ class SearchResponse(BaseModel):
     results: list[dict[str, Any]]
 
 
+class WarmCacheRequest(BaseModel):
+    """Optional body for /cache/warm."""
+
+    queries: list[str] | None = Field(
+        default=None,
+        description="List of queries to warm. Uses default medical queries if omitted.",
+    )
+    top_k: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Number of results per warmed query.",
+    )
+
+
+class WarmCacheResponse(BaseModel):
+    """Response body for /cache/warm."""
+
+    queries_warmed: int
+    already_cached: int
+    newly_cached: int
+    errors: list[str]
+
+
+@app.on_event("startup")
+def startup_warm_cache() -> None:
+    """Optionally warm the search cache in the background on startup."""
+    if os.getenv("CACHE_WARM_ON_STARTUP", "false").lower() in ("1", "true", "yes"):
+        logger.info("[startup] background cache warming enabled")
+
+        def _warm() -> None:
+            try:
+                result = warm_cache()
+                logger.info(f"[startup] cache warming complete: {result}")
+            except Exception as exc:
+                logger.warning(f"[startup] background cache warming failed: {exc}")
+
+        threading.Thread(target=_warm, daemon=True).start()
+    else:
+        logger.info("[startup] background cache warming disabled")
+
+
 @app.get("/health")
 def health_check() -> dict[str, Any]:
     """Return API health status."""
@@ -146,15 +175,15 @@ def search(request: SearchRequest) -> SearchResponse:
     Results are cached in Redis for 1 hour using a key derived from the query,
     top_k, and optional section_filter.
     """
-    redis_client = _get_redis_client()
-    cache_key = _cache_key(request.query, request.top_k, request.section_filter)
+    redis_client = get_redis_client()
+    key = cache_key(request.query, request.top_k, request.section_filter)
 
     # Try to serve a cached response.
     if redis_client is not None:
         try:
-            cached = redis_client.get(cache_key)
+            cached = redis_client.get(key)
             if cached:
-                logger.info(f"cache hit: {cache_key}")
+                logger.info(f"cache hit: {key}")
                 payload = json.loads(cached)
                 return SearchResponse(
                     query=payload["query"],
@@ -162,7 +191,7 @@ def search(request: SearchRequest) -> SearchResponse:
                     results=payload["results"],
                 )
         except Exception as exc:
-            logger.warning(f"Redis cache read failed for {cache_key}: {exc}")
+            logger.warning(f"Redis cache read failed for {key}: {exc}")
 
     try:
         candidates = hybrid_search(
@@ -199,9 +228,9 @@ def search(request: SearchRequest) -> SearchResponse:
     # Store the serialized response in Redis.
     if redis_client is not None:
         try:
-            redis_client.setex(cache_key, 3600, json.dumps(serialized_results))
+            redis_client.setex(key, 3600, json.dumps(serialized_results))
         except Exception as exc:
-            logger.warning(f"Redis cache write failed for {cache_key}: {exc}")
+            logger.warning(f"Redis cache write failed for {key}: {exc}")
 
     # Convert numpy types to Python floats
     for r in final_results:
@@ -215,3 +244,22 @@ def search(request: SearchRequest) -> SearchResponse:
         section_filter=serialized_results["section_filter"],
         results=serialized_results["results"],
     )
+
+
+@app.post("/cache/warm", response_model=WarmCacheResponse)
+def cache_warm(request: WarmCacheRequest) -> WarmCacheResponse:
+    """Pre-populate the Redis cache with the supplied (or default) queries."""
+    result = warm_cache(queries=request.queries, top_k=request.top_k)
+    return WarmCacheResponse(**result)
+
+
+@app.get("/cache/stats")
+def get_cache_stats() -> dict[str, Any]:
+    """Return operational statistics for the search cache."""
+    return cache_stats()
+
+
+@app.delete("/cache/clear")
+def delete_cache() -> dict[str, Any]:
+    """Clear all cached search results."""
+    return clear_cache()

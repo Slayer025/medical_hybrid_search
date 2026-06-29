@@ -30,6 +30,8 @@ For a comprehensive technical overview, see the **[Project Specification](docs/S
 - **Hybrid Search**: Combines dense vector search (semantic) with sparse BM25 search (keyword)
 - **Cross-Encoder Reranking**: Uses FlashRank for precision scoring
 - **Redis Query Caching**: Identical `/search` requests are served from Redis for ~<100 ms latency (1-hour TTL)
+- **Cache Warming**: Optional on-startup or on-demand warming so common medical queries are fast from the first request
+- **Cache Admin Endpoints**: `/cache/stats`, `/cache/clear`, and `/cache/warm` for operational cache management
 - **Async Processing**: Celery + Redis for background task handling
 - **Vector Database**: Qdrant for fast similarity search
 - **Section Filtering**: Search within BACKGROUND, METHODS, RESULTS, CONCLUSION sections
@@ -120,7 +122,10 @@ Open http://localhost:8501 in your browser.
 |--------|----------|-------------|
 | GET    | `/health` | Health check |
 | POST   | `/ingest` | Queue document ingestion |
-| POST   | `/search` | Hybrid search with reranking |
+| POST   | `/search` | Hybrid search with reranking and Redis caching |
+| POST   | `/cache/warm` | Pre-populate Redis cache with default or custom queries |
+| GET    | `/cache/stats` | Cache operational statistics |
+| DELETE | `/cache/clear` | Clear all cached search results |
 
 ### Search Example
 
@@ -128,6 +133,30 @@ Open http://localhost:8501 in your browser.
 curl -X POST "http://localhost:8000/search" \
   -H "Content-Type: application/json" \
   -d '{"query": "metformin cardiovascular risk diabetes", "section_filter": "RESULTS"}'
+```
+
+### Cache Warming Example
+
+```bash
+# Warm the default set of 15 common medical queries
+curl -X POST "http://localhost:8000/cache/warm" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+
+# Warm custom queries with top_k=10
+curl -X POST "http://localhost:8000/cache/warm" \
+  -H "Content-Type: application/json" \
+  -d '{"queries": ["epilepsy treatment", "parkinson'"'"'s disease"], "top_k": 10}'
+```
+
+### Cache Admin Examples
+
+```bash
+# Cache statistics
+curl -s http://localhost:8000/cache/stats | jq
+
+# Clear cache
+curl -X DELETE http://localhost:8000/cache/clear | jq
 ```
 
 ## Project Structure
@@ -157,6 +186,7 @@ medical_hybrid_search/
 5. **Cross-Encoder Reranking**: Score top 20 candidates with FlashRank
 6. **Return Top 5**: With scores, titles, and text snippets
 7. **Cache Result**: Store the serialized response in Redis for 1 hour so repeat queries skip embedding/retrieval/reranking
+8. **Warm Cache (optional)**: Pre-populate the cache on startup or via `POST /cache/warm` so common first-time queries are also sub-100 ms
 
 ## Scaling
 
