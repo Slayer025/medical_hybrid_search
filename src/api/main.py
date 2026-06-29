@@ -36,7 +36,7 @@ class IngestRequest(BaseModel):
     filename: str = Field(
         ...,
         description="Name of the raw PubMed JSONL file located in DATA_RAW_DIR.",
-        examples=["pubmed_subset_100.jsonl"],
+        examples=["pubmed_subset_1000.jsonl"],
     )
 
 

@@ -2,7 +2,6 @@
 
 Configures:
 - Dense vectors: 384-dimensional, Cosine distance.
-- Sparse vectors: Qdrant native BM25 tokenizer (Qdrant 1.11+).
 
 Run with --force to drop and recreate an existing collection.
 """
@@ -22,7 +21,6 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 COLLECTION_NAME = "medical_documents"
 DENSE_VECTOR_SIZE = 384
 DENSE_DISTANCE = models.Distance.COSINE
-SPARSE_VECTOR_NAME = "bm25"
 
 
 def get_qdrant_client() -> QdrantClient:
@@ -74,19 +72,10 @@ def setup_collection(client: QdrantClient, force: bool = False) -> None:
 
     client.create_collection(
         collection_name=COLLECTION_NAME,
-        vectors_config={
-            "default": models.VectorParams(
-                size=DENSE_VECTOR_SIZE,
-                distance=DENSE_DISTANCE,
-            )
-        },
-        sparse_vectors_config={
-            SPARSE_VECTOR_NAME: models.SparseVectorParams(
-                index=models.SparseIndexParams(
-                    on_disk=False,
-                ),
-            )
-        },
+        vectors_config=models.VectorParams(
+            size=DENSE_VECTOR_SIZE,
+            distance=DENSE_DISTANCE,
+        ),
     )
 
     # Payload indexes are optional but helpful for filtering and debugging.

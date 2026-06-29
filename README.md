@@ -80,7 +80,7 @@ docker compose up -d
 python src/ingestion/qdrant_setup.py
 
 # Download sample data
-python src/ingestion/downloader.py --count 100
+python src/ingestion/downloader.py --count 1000
 ```
 
 ## Running the System
@@ -105,7 +105,7 @@ celery -A src.tasks.celery_app worker --loglevel=info --concurrency=2
 # Trigger ingestion
 curl -X POST "http://localhost:8000/ingest" \
   -H "Content-Type: application/json" \
-  -d '{"filename": "pubmed_subset_100.jsonl"}'
+  -d '{"filename": "pubmed_subset_1000.jsonl"}'
 
 # Start UI
 streamlit run src/ui/app.py

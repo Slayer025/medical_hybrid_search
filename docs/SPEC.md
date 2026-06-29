@@ -1,7 +1,7 @@
 # Medical Hybrid Search POC — Specification Document
 
 > **Version:** 1.0  
-> **Date:** 2026-06-28  
+> **Date:** 2026-06-29  
 > **Status:** Proof of Concept — End-to-End Pipeline Working  
 > **Author:** DC  
 
@@ -92,7 +92,7 @@ The project follows a **service-oriented, container-ready architecture** with cl
 - The pipeline stores both vectors and rich metadata (title, section, source article ID, raw text).
 
 ### 4.5 Real-Time Search
-- Query embedding, dense retrieval, fusion, and reranking complete in **sub-second latency** for the current 100-document corpus.
+- Query embedding, dense retrieval, fusion, and reranking complete in **~6 seconds** for the current 1000-document corpus (see Performance section below).
 - Results are returned with relevance scores, section labels, and source metadata.
 
 ---
@@ -120,7 +120,7 @@ The ingestion pipeline moves raw medical abstracts into a searchable vector inde
 ### 6.1 Data Source
 - **Dataset:** HuggingFace `scientific_papers` dataset (PubMed split)
 - **Content:** Biomedical article abstracts and metadata
-- **Current scale:** 100 documents for the POC
+- **Current scale:** 1000 documents for the POC
 - **Scalable target:** 10,000+ documents
 
 ### 6.2 Processing Stages
@@ -200,7 +200,7 @@ Query ──▶ Embed ──▶ Dense Search (top 30)
 | Milestone | Status | Notes |
 |-----------|--------|-------|
 | End-to-end pipeline working | ✅ | Ingestion through UI fully operational |
-| 100 PubMed documents ingested | ✅ | Stored as section-aware chunks in Qdrant |
+| 1000 PubMed documents ingested | ✅ | Stored as section-aware chunks in Qdrant |
 | Search queries returning relevant results | ✅ | Dense retrieval active; BM25 fusion stubbed/enabled per configuration |
 | UI functional with section filtering | ✅ | Streamlit interface supports query + section filter |
 | Code pushed to GitHub | ✅ | Repository initialized and committed |
@@ -208,12 +208,40 @@ Query ──▶ Embed ──▶ Dense Search (top 30)
 
 ### Known Limitations
 - BM25 sparse retrieval is implemented/integrated but may be toggled or simplified in the POC build.
-- Corpus size is intentionally small (100 docs) for rapid iteration and validation.
+- Corpus size is intentionally small (1000 docs) for rapid iteration and validation.
 - No authentication, logging, or cloud deployment yet.
 
 ---
 
-## 9. Next Steps / Future Enhancements
+## 9. Performance Baseline
+
+Measured after scaling the corpus from 100 to 1000 documents on the local CPU-only stack (WSL2, Docker Desktop, Celery concurrency=2).
+
+| Metric | Value |
+|--------|-------|
+| Documents downloaded | 1000 |
+| Qdrant points (chunks) | 1002 |
+| Ingestion time | ~462 seconds (~7.7 minutes) |
+| Embedding batch size | 32 |
+
+### Search Latency & Top Scores
+
+| Query | Latency | Top Rerank Score |
+|-------|---------|------------------|
+| cancer chemotherapy | 6.417 s | 0.9651 |
+| diabetes treatment | 7.372 s | 0.9518 |
+| COVID vaccine | 5.536 s | 0.0089 |
+| cardiovascular risk | 6.907 s | 0.9937 |
+| Alzheimer's biomarkers | 6.500 s | 0.9994 |
+
+**Notes:**
+- All five queries returned 5 results.
+- Four of five queries produced top rerank scores above 0.95. The "COVID vaccine" query returned a top score of 0.0089, reflecting the absence of directly relevant COVID-19 vaccine abstracts in the sampled 1000-document subset.
+- End-to-end latency is dominated by the CPU cross-encoder reranker and TEI embedding call. Sub-second latency is expected after moving the reranker/embedding to GPU or adding a caching layer.
+
+---
+
+## 10. Next Steps / Future Enhancements
 
 ### Near Term
 1. **Scale to 10,000+ documents**
@@ -238,7 +266,7 @@ Query ──▶ Embed ──▶ Dense Search (top 30)
 
 ---
 
-## 10. Success Criteria
+## 11. Success Criteria
 
 The POC is considered successful when the following criteria are met:
 
@@ -246,7 +274,7 @@ The POC is considered successful when the following criteria are met:
 |-----------|--------|-------------|
 | Search latency | < 1 second | Average query round-trip time |
 | Relevance scores | > 0.6 for top relevant queries | FlashRank / cross-encoder score |
-| Real data processing | 100+ PubMed abstracts indexed | Qdrant collection count |
+| Real data processing | 1000+ PubMed abstracts indexed | Qdrant collection count |
 | Production-ready architecture | Containerized, modular services | Docker Compose + service separation |
 | Functional UI | Section filter + ranked results | Manual end-to-end test |
 | Code quality | Documented, version-controlled | GitHub repository + README + SPEC |
