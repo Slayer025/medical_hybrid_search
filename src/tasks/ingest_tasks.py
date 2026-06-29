@@ -15,6 +15,13 @@ from qdrant_client.http import models
 
 from src.ingestion.chunker import chunk_documents
 from src.ingestion.embedder import TEIEmbedder
+from src.ingestion.sparse_encoder import (
+    build_vocabulary,
+    compute_idf,
+    compute_sparse_vectors,
+    get_vocab_path,
+    save_vocab,
+)
 from src.tasks.celery_app import app
 
 
@@ -54,8 +61,13 @@ def _upsert_batch(
     client: QdrantClient,
     embedder: TEIEmbedder,
     batch_chunks: list[dict[str, Any]],
+    batch_sparse_vectors: list[models.SparseVector],
 ) -> int:
-    """Embed and upsert a single batch of chunks into Qdrant."""
+    """Embed and upsert a single batch of chunks into Qdrant.
+
+    Each point contains both a dense embedding (default/unnamed vector) and a
+    named sparse vector for keyword retrieval.
+    """
     texts = [chunk["text"] for chunk in batch_chunks]
     embeddings = embedder.embed_texts(texts)
 
@@ -63,9 +75,15 @@ def _upsert_batch(
         raise ValueError(
             f"Embedding count mismatch: {len(embeddings)} vs {len(batch_chunks)}"
         )
+    if len(batch_sparse_vectors) != len(batch_chunks):
+        raise ValueError(
+            f"Sparse vector count mismatch: {len(batch_sparse_vectors)} vs {len(batch_chunks)}"
+        )
 
     points = []
-    for chunk, vector in zip(batch_chunks, embeddings):
+    for chunk, vector, sparse_vector in zip(
+        batch_chunks, embeddings, batch_sparse_vectors
+    ):
         point_id = _qdrant_uuid(chunk["chunk_id"])
         payload = {
             "doc_id": chunk["doc_id"],
@@ -77,7 +95,7 @@ def _upsert_batch(
         points.append(
             models.PointStruct(
                 id=point_id,
-                vector=vector,
+                vector={"": vector, "sparse": sparse_vector},
                 payload=payload,
             )
         )
@@ -130,6 +148,17 @@ def ingest_documents_pipeline(self, file_path: str) -> dict[str, Any]:
     logger.info(f"[ingest_documents_pipeline] loading {chunk_count} chunks")
     chunks = _load_chunks(processed_path)
 
+    logger.info("[ingest_documents_pipeline] building sparse vector vocabulary")
+    texts = [chunk["text"] for chunk in chunks]
+    vocab = build_vocabulary(texts)
+    idf = compute_idf(texts, vocab)
+    sparse_vectors = compute_sparse_vectors(texts, vocab, idf)
+    vocab_path = get_vocab_path(processed_dir)
+    save_vocab(vocab, idf, vocab_path)
+    logger.info(
+        f"[ingest_documents_pipeline] sparse vocab size: {len(vocab)} saved to {vocab_path}"
+    )
+
     embedder = TEIEmbedder()
     client = _get_qdrant_client()
 
@@ -139,11 +168,12 @@ def ingest_documents_pipeline(self, file_path: str) -> dict[str, Any]:
     try:
         for i in range(0, len(chunks), batch_size):
             batch = chunks[i : i + batch_size]
+            batch_sparse = sparse_vectors[i : i + batch_size]
             logger.info(
                 f"[ingest_documents_pipeline] embedding batch {i // batch_size + 1} "
                 f"({len(batch)} chunks)"
             )
-            upserted = _upsert_batch(client, embedder, batch)
+            upserted = _upsert_batch(client, embedder, batch, batch_sparse)
             upsert_count += upserted
             logger.info(
                 f"[ingest_documents_pipeline] upserted {upsert_count}/{len(chunks)} chunks"

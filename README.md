@@ -67,8 +67,8 @@ git clone <your-repo-url>
 cd medical_hybrid_search
 
 # Create virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
@@ -151,7 +151,7 @@ medical_hybrid_search/
 
 1. **Embed Query**: Convert query to 384-dim dense vector via TEI
 2. **Dense Search**: Find top 30 similar vectors (cosine similarity)
-3. **Sparse Search**: BM25 keyword matching (if sparse vectors are configured)
+3. **Sparse Search**: BM25 keyword matching via Qdrant named sparse vectors (active)
 4. **Reciprocal Rank Fusion**: Combine both result lists with `score = Σ 1 / (60 + rank)`
 5. **Cross-Encoder Reranking**: Score top 20 candidates with FlashRank
 6. **Return Top 5**: With scores, titles, and text snippets

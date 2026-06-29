@@ -1,7 +1,8 @@
 """Initialize the Qdrant collection for hybrid medical document search.
 
 Configures:
-- Dense vectors: 384-dimensional, Cosine distance.
+- Dense vectors: 384-dimensional, Cosine distance (unnamed/default).
+- Sparse vectors: named "sparse" vector for TF-IDF/BM25-style retrieval.
 
 Run with --force to drop and recreate an existing collection.
 """
@@ -21,6 +22,7 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 COLLECTION_NAME = "medical_documents"
 DENSE_VECTOR_SIZE = 384
 DENSE_DISTANCE = models.Distance.COSINE
+SPARSE_VECTOR_NAME = "sparse"
 
 
 def get_qdrant_client() -> QdrantClient:
@@ -76,6 +78,13 @@ def setup_collection(client: QdrantClient, force: bool = False) -> None:
             size=DENSE_VECTOR_SIZE,
             distance=DENSE_DISTANCE,
         ),
+        sparse_vectors_config={
+            SPARSE_VECTOR_NAME: models.SparseVectorParams(
+                index=models.SparseIndexParams(
+                    on_disk=False,
+                ),
+            )
+        },
     )
 
     # Payload indexes are optional but helpful for filtering and debugging.

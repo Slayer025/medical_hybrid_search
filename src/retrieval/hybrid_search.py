@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
@@ -15,6 +16,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
 from src.ingestion.embedder import TEIEmbedder
+from src.ingestion.sparse_encoder import build_query_sparse_vector, load_vocab, get_vocab_path
 
 
 load_dotenv()
@@ -24,7 +26,7 @@ logger = logging.getLogger(__name__)
 COLLECTION_NAME = "medical_documents"
 DENSE_LIMIT = 30
 SPARSE_LIMIT = 30
-SPARSE_VECTOR_NAME = "bm25"
+SPARSE_VECTOR_NAME = "sparse"
 RRF_K = 60
 
 
@@ -37,6 +39,12 @@ def _collection_has_sparse_vectors(client: QdrantClient) -> bool:
     except Exception as exc:
         logger.warning(f"Could not determine sparse vector config: {exc}")
         return False
+
+
+def _get_sparse_vocab() -> tuple[dict[str, int], dict[int, float]] | None:
+    """Load the sparse vocabulary if it exists."""
+    processed_dir = Path(os.getenv("DATA_PROCESSED_DIR", "data/processed"))
+    return load_vocab(get_vocab_path(processed_dir))
 
 
 def _get_qdrant_client() -> QdrantClient:
@@ -84,33 +92,23 @@ def _dense_search(
 def _sparse_search(
     client: QdrantClient,
     query: str,
+    vocab: dict[str, int],
     limit: int,
     section_filter: str | None,
 ) -> list[models.ScoredPoint]:
-    """Run native BM25 sparse vector search in Qdrant.
-
-    Qdrant 1.11+ supports a built-in BM25 sparse encoder that tokenizes text
-    payloads automatically. We query it with an explicit sparse vector whose
-    non-zero entries correspond to the query terms.
-    """
+    """Run sparse TF-IDF vector search in Qdrant using the shared vocabulary."""
     try:
-        # Build a simple term-frequency sparse vector from the query text.
-        terms = query.lower().split()
-        if not terms:
+        sparse_vector = build_query_sparse_vector(query, vocab)
+        if not sparse_vector.indices:
+            logger.info("[hybrid_search] query has no known sparse terms; skipping sparse search")
             return []
-
-        unique_terms = sorted(set(terms))
-        indices = list(range(len(unique_terms)))
-        values = [float(terms.count(term)) for term in unique_terms]
-
-        sparse_vector = models.SparseVector(
-            indices=indices,
-            values=values,
-        )
 
         return client.search(
             collection_name=COLLECTION_NAME,
-            query_vector=(SPARSE_VECTOR_NAME, sparse_vector),
+            query_vector=models.NamedSparseVector(
+                name=SPARSE_VECTOR_NAME,
+                vector=sparse_vector,
+            ),
             query_filter=_build_filter(section_filter),
             limit=limit,
             with_payload=True,
@@ -198,11 +196,14 @@ def hybrid_search(
             client, query_vector, DENSE_LIMIT, section_filter
         )
 
-        if _collection_has_sparse_vectors(client):
+        vocab = _get_sparse_vocab()
+        if _collection_has_sparse_vectors(client) and vocab is not None:
             logger.info("[hybrid_search] running sparse BM25 search...")
-            sparse_results = _sparse_search(client, query, SPARSE_LIMIT, section_filter)
+            sparse_results = _sparse_search(
+                client, query, vocab[0], SPARSE_LIMIT, section_filter
+            )
         else:
-            logger.info("[hybrid_search] collection has no sparse vectors; dense-only")
+            logger.info("[hybrid_search] collection has no sparse vectors or vocab; dense-only")
             sparse_results = []
 
         logger.info(
