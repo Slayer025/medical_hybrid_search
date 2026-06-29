@@ -62,6 +62,13 @@ class SearchRequest(BaseModel):
         description="Optional section payload filter (e.g., RESULTS, CONCLUSION).",
         examples=["RESULTS"],
     )
+    top_k: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Number of top reranked results to return (1-50).",
+        examples=[5],
+    )
 
 
 class SearchResponse(BaseModel):
@@ -115,7 +122,7 @@ def search(request: SearchRequest) -> SearchResponse:
         final_results = rerank_results(
             query=request.query,
             candidates=candidates,
-            top_k=5,
+            top_k=request.top_k,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -144,27 +151,6 @@ def search(request: SearchRequest) -> SearchResponse:
             r.score = float(r.score)
         if hasattr(r, "final_score"):
             r.final_score = float(r.final_score)
-    
-    # Convert numpy types to Python floats
-
-    
-    for r in final_results:
-
-    
-        if hasattr(r, 'score'):
-
-    
-            r.score = float(r.score)
-
-    
-        if hasattr(r, 'final_score'):
-
-    
-            r.final_score = float(r.final_score)
-
-    
-    
-
     
     return SearchResponse(
         query=serialized_results["query"],
