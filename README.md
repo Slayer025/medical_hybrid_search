@@ -83,7 +83,7 @@ docker compose up -d
 python src/ingestion/qdrant_setup.py
 
 # Download sample data
-python src/ingestion/downloader.py --count 1000
+python src/ingestion/downloader.py --count 5000
 ```
 
 ## Running the System
@@ -108,7 +108,7 @@ celery -A src.tasks.celery_app worker --loglevel=info --concurrency=2
 # Trigger ingestion
 curl -X POST "http://localhost:8000/ingest" \
   -H "Content-Type: application/json" \
-  -d '{"filename": "pubmed_subset_1000.jsonl"}'
+  -d '{"filename": "pubmed_subset_5000.jsonl"}'
 
 # Start UI
 streamlit run src/ui/app.py
@@ -190,6 +190,6 @@ medical_hybrid_search/
 
 ## Scaling
 
-- Increase document count: `python src/ingestion/downloader.py --count 10000`
+- Increase document count: `python src/ingestion/downloader.py --count 50000`
 - Add more Celery workers for parallel processing
 - Qdrant scales to millions of vectors

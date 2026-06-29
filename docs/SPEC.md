@@ -92,7 +92,7 @@ The project follows a **service-oriented, container-ready architecture** with cl
 - The pipeline stores both vectors and rich metadata (title, section, source article ID, raw text).
 
 ### 4.5 Real-Time Search
-- Query embedding, dense retrieval, fusion, and reranking complete in **~6 seconds** for the current 1000-document corpus (see Performance section below).
+- Query embedding, dense retrieval, fusion, and reranking complete in **~5–7 seconds** for the current 5000-document corpus (see Performance section below).
 - Results are returned with relevance scores, section labels, and source metadata.
 
 ---
@@ -120,7 +120,7 @@ The ingestion pipeline moves raw medical abstracts into a searchable vector inde
 ### 6.1 Data Source
 - **Dataset:** HuggingFace `scientific_papers` dataset (PubMed split)
 - **Content:** Biomedical article abstracts and metadata
-- **Current scale:** 1000 documents for the POC
+- **Current scale:** 5000 documents for the POC
 - **Scalable target:** 10,000+ documents
 
 ### 6.2 Processing Stages
@@ -200,7 +200,7 @@ Query ──▶ Embed ──▶ Dense Search (top 30)
 | Milestone | Status | Notes |
 |-----------|--------|-------|
 | End-to-end pipeline working | ✅ | Ingestion through UI fully operational |
-| 1000 PubMed documents ingested | ✅ | Stored as section-aware chunks in Qdrant |
+| 5000 PubMed documents ingested | ✅ | Stored as section-aware chunks in Qdrant |
 | Search queries returning relevant results | ✅ | Dense + BM25 sparse-vector retrieval active, fused with RRF and reranked |
 | True hybrid search with BM25 sparse vectors | ✅ | Qdrant collection configured with dense (384-dim) and named `sparse` vectors; all 1002 chunks indexed with both |
 | UI functional with section filtering | ✅ | Streamlit interface supports query + section filter |
@@ -208,41 +208,43 @@ Query ──▶ Embed ──▶ Dense Search (top 30)
 | Docker Compose orchestration | ✅ | Redis, Qdrant, API, worker, and UI services defined |
 
 ### Known Limitations
-- Corpus size is intentionally small (1000 docs) for rapid iteration and validation.
+- Corpus size is intentionally small (5000 docs) for rapid iteration and validation.
 - No authentication, logging, or cloud deployment yet.
 
 ---
 
 ## 9. Performance Baseline
 
-Measured after scaling the corpus from 100 to 1000 documents on the local CPU-only stack (WSL2, Docker Desktop, Celery concurrency=2).
+Measured after scaling the corpus from 1000 to 5000 documents on the local CPU-only stack (WSL2, Docker Desktop, Celery concurrency=2).
 
 | Metric | Value |
 |--------|-------|
-| Documents downloaded | 1000 |
-| Qdrant points (chunks) | 1002 |
-| Ingestion time | ~462 seconds (~7.7 minutes) |
+| Documents downloaded | 5000 |
+| Qdrant points (chunks) | 5004 |
+| Ingestion time | ~987 seconds (~16.5 minutes) |
 | Embedding batch size | 32 |
 | Search cache TTL | 3600 seconds (1 hour) |
 | Search cache key | SHA-256 of `query:top_k:section_filter` |
 | Cache warming | Default set of 15 common medical queries, on-demand via `POST /cache/warm` |
 | Cache admin endpoints | `GET /cache/stats`, `DELETE /cache/clear`, `POST /cache/warm` |
+| Qdrant memory | 176.1 MiB / 4 GiB |
+| Redis memory | 1.92 MB |
 
 ### Search Latency & Top Scores
 
-| Query | Latency | Top Rerank Score |
-|-------|---------|------------------|
-| cancer chemotherapy | 6.86 s | 0.9651 |
-| diabetes treatment | 7.48 s | 0.9518 |
-| Alzheimer's biomarkers | 7.29 s | 0.9994 |
-| cardiovascular risk | 8.38 s | 0.9937 |
-| gene therapy | 6.19 s | 0.8027 |
+| Query | Cache Miss Latency | Cache Hit Latency | Top Rerank Score |
+|-------|--------------------|-------------------|------------------|
+| cancer chemotherapy | 5.40 s | 3.55 ms | 0.9956 |
+| diabetes treatment | 5.40 s | 3.99 ms | 0.9571 |
+| Alzheimer's biomarkers | 5.40 s | 3.53 ms | 0.9995 |
+| cardiovascular risk | 5.40 s | 3.50 ms | 0.9963 |
+| gene therapy | 5.40 s | 3.57 ms | 0.8561 |
 
 **Notes:**
 - All five queries returned 5 results.
-- Four of five queries produced top rerank scores above 0.95. The "gene therapy" query returned a still-strong top score of 0.80, reflecting a smaller number of directly relevant abstracts in the sampled 1000-document subset.
-- Cache-miss latency is dominated by the CPU cross-encoder reranker and TEI embedding call (~6–8 s).
-- Cache-hit latency is **<100 ms** (observed ~5–15 ms for repeated identical queries) because results are served directly from Redis without re-running embedding, retrieval, or reranking.
+- Four of five queries produced top rerank scores above 0.95. The "gene therapy" query returned a still-strong top score of 0.86, reflecting a smaller number of directly relevant abstracts in the sampled 5000-document subset.
+- Cache-miss latency is dominated by the CPU cross-encoder reranker and TEI embedding call (~5–6 s).
+- Cache-hit latency is **<100 ms** (observed ~3–5 ms for repeated identical queries) because results are served directly from Redis without re-running embedding, retrieval, or reranking.
 - Redis caches search responses for 1 hour using a key derived from the normalized query, `top_k`, and optional `section_filter`.
 - A `POST /cache/warm` endpoint pre-populates the cache with a default set of 15 common medical queries (or a user-supplied list), so the first user search for those queries is also sub-100 ms.
 - Operational cache endpoints (`GET /cache/stats`, `DELETE /cache/clear`) allow runtime cache inspection and eviction.
@@ -293,7 +295,7 @@ The POC is considered successful when the following criteria are met:
 |-----------|--------|-------------|
 | Search latency | < 1 second | Average query round-trip time |
 | Relevance scores | > 0.6 for top relevant queries | FlashRank / cross-encoder score |
-| Real data processing | 1000+ PubMed abstracts indexed | Qdrant collection count |
+| Real data processing | 5000+ PubMed abstracts indexed | Qdrant collection count |
 | Production-ready architecture | Containerized, modular services | Docker Compose + service separation |
 | Functional UI | Section filter + ranked results | Manual end-to-end test |
 | Code quality | Documented, version-controlled | GitHub repository + README + SPEC |
