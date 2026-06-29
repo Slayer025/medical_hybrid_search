@@ -7,12 +7,15 @@ Endpoints:
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import redis
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -23,6 +26,32 @@ from src.tasks.ingest_tasks import ingest_documents_pipeline
 
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+_redis_client: redis.Redis | None = None
+
+
+def _get_redis_client() -> redis.Redis | None:
+    """Return a Redis client, or None if Redis is unreachable."""
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client
+    try:
+        _redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+        _redis_client.ping()
+        return _redis_client
+    except Exception as exc:
+        logger.warning(f"Redis unavailable, search caching disabled: {exc}")
+        _redis_client = None
+        return None
+
+
+def _cache_key(query: str, top_k: int, section_filter: str | None) -> str:
+    """Build a deterministic cache key for a search request."""
+    key_payload = f"{query.strip().lower()}:{top_k}:{section_filter or ''}"
+    return f"search_cache:{hashlib.sha256(key_payload.encode()).hexdigest()}"
 
 app = FastAPI(
     title="Medical Hybrid Search API",
@@ -112,7 +141,29 @@ def ingest(request: IngestRequest) -> IngestResponse:
 
 @app.post("/search", response_model=SearchResponse)
 def search(request: SearchRequest) -> SearchResponse:
-    """Run hybrid dense + sparse retrieval, rerank, and return the top results."""
+    """Run hybrid dense + sparse retrieval, rerank, and return the top results.
+
+    Results are cached in Redis for 1 hour using a key derived from the query,
+    top_k, and optional section_filter.
+    """
+    redis_client = _get_redis_client()
+    cache_key = _cache_key(request.query, request.top_k, request.section_filter)
+
+    # Try to serve a cached response.
+    if redis_client is not None:
+        try:
+            cached = redis_client.get(cache_key)
+            if cached:
+                logger.info(f"cache hit: {cache_key}")
+                payload = json.loads(cached)
+                return SearchResponse(
+                    query=payload["query"],
+                    section_filter=payload["section_filter"],
+                    results=payload["results"],
+                )
+        except Exception as exc:
+            logger.warning(f"Redis cache read failed for {cache_key}: {exc}")
+
     try:
         candidates = hybrid_search(
             query=request.query,
@@ -145,13 +196,20 @@ def search(request: SearchRequest) -> SearchResponse:
         )
     )
 
+    # Store the serialized response in Redis.
+    if redis_client is not None:
+        try:
+            redis_client.setex(cache_key, 3600, json.dumps(serialized_results))
+        except Exception as exc:
+            logger.warning(f"Redis cache write failed for {cache_key}: {exc}")
+
     # Convert numpy types to Python floats
     for r in final_results:
         if hasattr(r, "score"):
             r.score = float(r.score)
         if hasattr(r, "final_score"):
             r.final_score = float(r.final_score)
-    
+
     return SearchResponse(
         query=serialized_results["query"],
         section_filter=serialized_results["section_filter"],

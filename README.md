@@ -29,6 +29,7 @@ For a comprehensive technical overview, see the **[Project Specification](docs/S
 
 - **Hybrid Search**: Combines dense vector search (semantic) with sparse BM25 search (keyword)
 - **Cross-Encoder Reranking**: Uses FlashRank for precision scoring
+- **Redis Query Caching**: Identical `/search` requests are served from Redis for ~<100 ms latency (1-hour TTL)
 - **Async Processing**: Celery + Redis for background task handling
 - **Vector Database**: Qdrant for fast similarity search
 - **Section Filtering**: Search within BACKGROUND, METHODS, RESULTS, CONCLUSION sections
@@ -155,6 +156,7 @@ medical_hybrid_search/
 4. **Reciprocal Rank Fusion**: Combine both result lists with `score = Σ 1 / (60 + rank)`
 5. **Cross-Encoder Reranking**: Score top 20 candidates with FlashRank
 6. **Return Top 5**: With scores, titles, and text snippets
+7. **Cache Result**: Store the serialized response in Redis for 1 hour so repeat queries skip embedding/retrieval/reranking
 
 ## Scaling
 

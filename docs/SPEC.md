@@ -223,6 +223,8 @@ Measured after scaling the corpus from 100 to 1000 documents on the local CPU-on
 | Qdrant points (chunks) | 1002 |
 | Ingestion time | ~462 seconds (~7.7 minutes) |
 | Embedding batch size | 32 |
+| Search cache TTL | 3600 seconds (1 hour) |
+| Search cache key | SHA-256 of `query:top_k:section_filter` |
 
 ### Search Latency & Top Scores
 
@@ -237,7 +239,9 @@ Measured after scaling the corpus from 100 to 1000 documents on the local CPU-on
 **Notes:**
 - All five queries returned 5 results.
 - Four of five queries produced top rerank scores above 0.95. The "gene therapy" query returned a still-strong top score of 0.80, reflecting a smaller number of directly relevant abstracts in the sampled 1000-document subset.
-- End-to-end latency is dominated by the CPU cross-encoder reranker and TEI embedding call. Sub-second latency is expected after moving the reranker/embedding to GPU or adding a caching layer.
+- Cache-miss latency is dominated by the CPU cross-encoder reranker and TEI embedding call (~6–8 s).
+- Cache-hit latency is **<100 ms** (observed ~14 ms for repeated identical queries) because results are served directly from Redis without re-running embedding, retrieval, or reranking.
+- Redis caches search responses for 1 hour using a key derived from the normalized query, `top_k`, and optional `section_filter`.
 
 ---
 
